@@ -134,8 +134,14 @@ static Status fft_radix2(OpKernelContext* /*ctx*/, const Tensor* X, Tensor* Y, s
 
   for (size_t i = 0; i < dft_length; i++) {
     size_t bit_reversed_index = bit_reverse(i, significant_bits);
+    #if defined(WITH_UE) && defined(__PROSPERO__)
+    auto x = (bit_reversed_index < number_of_samples) ? *(X_data + bit_reversed_index * X_stride) : U(0);
+    auto window_element = window_data ? *(window_data + bit_reversed_index) : U(1);
+    #else
     auto x = (bit_reversed_index < number_of_samples) ? *(X_data + bit_reversed_index * X_stride) : 0;
     auto window_element = window_data ? *(window_data + bit_reversed_index) : 1;
+    #endif
+    
     *(Y_data + i * Y_data_stride) = std::complex<T>(1, 0) * x * window_element;
   }
 
@@ -207,8 +213,13 @@ static Status dft_naive(const Tensor* X, Tensor* Y, size_t X_offset, size_t X_st
 
     for (size_t j = 0; j < dft_length; j++) {  // vectorize over this loop
       auto exponential = compute_exponential(i * j, angular_velocity);
+      #if defined(WITH_UE) && defined(__PROSPERO__)
+      auto window_element = window_data ? *(window_data + j) : U(1);
+      auto x = (j < number_of_samples) ? *(X_data + j * X_stride) : U(0);
+      #else
       auto window_element = window_data ? *(window_data + j) : 1;
       auto x = (j < number_of_samples) ? *(X_data + j * X_stride) : 0;
+      #endif // WITH_UE
       auto element = x * window_element;
       out += exponential * element;
     }

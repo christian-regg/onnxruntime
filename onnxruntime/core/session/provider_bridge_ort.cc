@@ -65,17 +65,76 @@ using IndexedSubGraph_MetaDef = IndexedSubGraph::MetaDef;
 #include "core/common/logging/logging.h"
 #include "core/providers/shared_library/provider_interfaces.h"
 
+#ifdef WITH_UE
+
+#include <memory>
+#include "core/providers/providers.h"
+
+#include "core/providers/cuda/cuda_provider_options.h"
+#include "core/providers/tensorrt/tensorrt_provider_options.h"
+
+
+struct ProviderInfo_CUDAandROCM {
+	std::unique_ptr<onnxruntime::IAllocator> CreateCUDAPinnedAllocator(int16_t, const char*) { return nullptr; }
+	std::unique_ptr<onnxruntime::IAllocator> CreateROCMPinnedAllocator(int16_t, const char*) { return nullptr; }
+	void CopyGpuToCpu(void*, const void*, const size_t, const OrtMemoryInfo&, const OrtMemoryInfo&) {}
+	OrtStatus* GetCurrentGpuDeviceId(int*) { return nullptr; }
+	OrtStatus* SetCurrentGpuDeviceId(int) { return nullptr; }
+	void cudaMemcpy_HostToDevice(void*, const void*, size_t) {}
+	void rocmMemcpy_HostToDevice(void*, const void*, size_t) {}
+};
+using ProviderInfo_CUDA = ProviderInfo_CUDAandROCM;
+using ProviderInfo_ROCM = ProviderInfo_CUDAandROCM;
+
+
+struct OrtROCMProviderOptions;
+
+namespace onnxruntime {
+
+	struct CudaProviderFactoryCreator {
+		static std::shared_ptr<IExecutionProviderFactory> Create(const OrtCUDAProviderOptions* provider_options);
+		static std::shared_ptr<IExecutionProviderFactory> Create(const OrtCUDAProviderOptionsV2* provider_options);
+	};
+
+
+	struct RocmProviderFactoryCreator {
+		static std::shared_ptr<IExecutionProviderFactory> Create(const OrtROCMProviderOptions* provider_options);
+	};
+
+	struct DnnlProviderFactoryCreator {
+		static std::shared_ptr<IExecutionProviderFactory> Create(int use_arena);
+	};
+
+	struct TensorrtProviderFactoryCreator {
+		static std::shared_ptr<IExecutionProviderFactory> Create(int device_id);
+		static std::shared_ptr<IExecutionProviderFactory> Create(const OrtTensorRTProviderOptions* provider_options);
+		static std::shared_ptr<IExecutionProviderFactory> Create(const OrtTensorRTProviderOptionsV2* provider_options);
+	};
+
+	struct OpenVINOProviderFactoryCreator {
+		static std::shared_ptr<IExecutionProviderFactory> Create(const OrtOpenVINOProviderOptions* provider_options);
+	};
+
+	struct MIGraphXProviderFactoryCreator {
+		static std::shared_ptr<IExecutionProviderFactory> Create(int device_id);
+		static std::shared_ptr<IExecutionProviderFactory> Create(const OrtMIGraphXProviderOptions* options);
+};
+}
+
+#else
 #include "core/providers/cuda/cuda_provider_factory_creator.h"
 #include "core/providers/rocm/rocm_provider_factory_creator.h"
 #include "core/providers/dnnl/dnnl_provider_factory_creator.h"
-#include "core/providers/migraphx/migraphx_provider_factory_creator.h"
 #include "core/providers/openvino/openvino_provider_factory_creator.h"
 #include "core/providers/tensorrt/tensorrt_provider_factory_creator.h"
+#include "core/providers/migraphx/migraphx_provider_factory_creator.h"
 
 #include "core/providers/cuda/cuda_provider_factory.h"
 #include "core/providers/rocm/rocm_provider_factory.h"
-#include "core/providers/dnnl/dnnl_provider_factory.h"
 #include "core/providers/migraphx/migraphx_provider_factory.h"
+#endif //WITH_UE
+
+#include "core/providers/dnnl/dnnl_provider_factory.h"
 #include "core/providers/openvino/openvino_provider_factory.h"
 #include "core/providers/tensorrt/tensorrt_provider_factory.h"
 #include "core/providers/tensorrt/tensorrt_provider_options.h"
@@ -1002,12 +1061,34 @@ struct ProviderSharedLibrary {
 
 static ProviderSharedLibrary s_library_shared;
 
+#ifndef WITH_UE 
 bool InitProvidersSharedLibrary() try {
   s_library_shared.Ensure();
   return true;
 } catch (const std::exception&) {
   return false;
 }
+#else 
+/*
+#ifndef __PROSPERO__
+bool InitProvidersSharedLibrary() try {
+  s_library_shared.Ensure();
+  return true;
+} catch (const std::exception&) {
+  return false;
+}
+#else
+bool InitProvidersSharedLibrary() {
+  s_library_shared.Ensure();
+  return true;
+}
+#endif
+*/
+bool InitProvidersSharedLibrary() {
+  s_library_shared.Ensure();
+  return true;
+}
+#endif // WITH_UE
 
 struct ProviderLibrary {
   ProviderLibrary(const char* filename, bool unload = true) : filename_{filename}, unload_{unload} {}
@@ -1017,7 +1098,9 @@ struct ProviderLibrary {
 
   Provider& Get() {
     std::lock_guard<std::mutex> lock{mutex_};
+    #ifndef WITH_UE
     try {
+    #endif // WITH_UE
       if (!provider_) {
         s_library_shared.Ensure();
 
@@ -1031,10 +1114,12 @@ struct ProviderLibrary {
         provider_->Initialize();
       }
       return *provider_;
+    #ifndef WITH_UE
     } catch (...) {
       Unload();  // If anything fails we unload the library and rethrow
       throw;
     }
+    #endif // WITH_UE
   }
 
   void Unload() {
@@ -1204,12 +1289,18 @@ ProviderInfo_OpenVINO* GetProviderInfo_OpenVINO() {
   return reinterpret_cast<ProviderInfo_OpenVINO*>(s_library_openvino.Get().GetInfo());
 }
 
+#ifndef WITH_UE
 ProviderInfo_CUDA* TryGetProviderInfo_CUDA() try {
   return reinterpret_cast<ProviderInfo_CUDA*>(s_library_cuda.Get().GetInfo());
 } catch (const std::exception& exception) {
   LOGS_DEFAULT(ERROR) << exception.what();
   return nullptr;
 }
+#else
+ProviderInfo_CUDA* TryGetProviderInfo_CUDA() {
+  return reinterpret_cast<ProviderInfo_CUDA*>(s_library_cuda.Get().GetInfo());
+} 
+#endif //WITH_UE
 
 ProviderInfo_CUDA& GetProviderInfo_CUDA() {
   if (auto* info = TryGetProviderInfo_CUDA())
@@ -1218,12 +1309,18 @@ ProviderInfo_CUDA& GetProviderInfo_CUDA() {
   ORT_THROW("CUDA Provider not available, can't get interface for it");
 }
 
+#ifndef WITH_UE
 ProviderInfo_ROCM* TryGetProviderInfo_ROCM() try {
   return reinterpret_cast<ProviderInfo_ROCM*>(s_library_rocm.Get().GetInfo());
 } catch (const std::exception& exception) {
   LOGS_DEFAULT(ERROR) << exception.what();
   return nullptr;
 }
+#else
+ProviderInfo_ROCM* TryGetProviderInfo_ROCM() {
+  return reinterpret_cast<ProviderInfo_ROCM*>(s_library_rocm.Get().GetInfo());
+}
+#endif //WITH_UE
 
 ProviderInfo_ROCM& GetProviderInfo_ROCM() {
   if (auto* info = TryGetProviderInfo_ROCM())

@@ -28,7 +28,12 @@
 
 #if _WIN32
 
+#include "NNXThirdPartyWarningDisabler.h"
+NNX_THIRD_PARTY_INCLUDES_START
+#undef check
+#undef TEXT
 #include "Windows.h"
+NNX_THIRD_PARTY_INCLUDES_END
 
 #define HAS_WINDOWS_DESKTOP WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 

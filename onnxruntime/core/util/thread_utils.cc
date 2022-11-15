@@ -41,6 +41,8 @@ CreateThreadPoolHelper(Env* env, OrtThreadPoolParams options) {
     ORT_ENFORCE(to.custom_join_thread_fn, "custom join thread function not set");
   }
 
+  to.ThreadPri = options.ThreadPri; // WITH_UE
+
   return std::make_unique<ThreadPool>(env, to, options.name, options.thread_pool_size,
                                       options.allow_spinning);
 }

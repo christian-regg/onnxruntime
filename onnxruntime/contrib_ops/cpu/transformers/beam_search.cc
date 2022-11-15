@@ -1,6 +1,16 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+
+#include "NNXThirdPartyWarningDisabler.h"
+NNX_THIRD_PARTY_INCLUDES_START
+#undef check
+#undef TEXT
+
+#ifdef WITH_UE
+#pragma warning(disable : 4800)
+#endif //WITH_UE
+
 // there's no way to use a raw pointer as the copy destination with std::copy_n
 // (which gsl::copy uses with span::data() which returns a raw pointer) with the 14.11 toolset
 // without generating a 4996 warning. going through an iterator is way too much overhead so turn off the warning.
@@ -215,3 +225,4 @@ Status BeamSearch::Compute(OpKernelContext* ctx) const {
 }  // namespace transformers
 }  // namespace contrib
 }  // namespace onnxruntime
+NNX_THIRD_PARTY_INCLUDES_END
