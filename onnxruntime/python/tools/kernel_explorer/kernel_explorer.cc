@@ -5,14 +5,24 @@
 #include <pybind11/numpy.h>
 #include "python/tools/kernel_explorer/device_array.h"
 #include "python/tools/kernel_explorer/kernels/vector_add.h"
-#include "python/tools/kernel_explorer/kernels/fast_gelu.h"
+#include "python/tools/kernel_explorer/kernels/rocm/fast_gelu.h"
+#include "python/tools/kernel_explorer/kernels/rocm/gemm.h"
+#include "python/tools/kernel_explorer/kernels/rocm/skip_layer_norm.h"
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(kernel_explorer, m) {
+namespace onnxruntime {
+
+PYBIND11_MODULE(_kernel_explorer, m) {
   py::class_<DeviceArray>(m, "DeviceArray")
-    .def(py::init<py::array>())
-    .def("UpdateHostNumpyArray", &DeviceArray::UpdateHostNumpyArray);
+      .def(py::init<py::array>())
+      .def("UpdateHostNumpyArray", &DeviceArray::UpdateHostNumpyArray);
   InitVectorAdd(m);
+#if USE_ROCM
   InitFastGelu(m);
+  InitGemm(m);
+  InitSkipLayerNorm(m);
+#endif
 }
+
+}  // namespace onnxruntime

@@ -461,6 +461,44 @@ void BeamSearchShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) {
   }
 }
 
+void GreedySearchShapeInference(ONNX_NAMESPACE::InferenceContext& ctx) {
+  // Type inference
+  ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
+
+  // Shape inference
+  // input 0 (input_ids) shape: (batch_size, sequence_length)
+  // output 0 (sequences) shape: (batch_size, max_length)
+  // output 1 (scores) shape: (max_length - sequence_length, batch_size, num_beams, vocab_size)
+  if (!hasInputShape(ctx, 0)) {
+    return;
+  }
+  auto& input_ids_shape = getInputShape(ctx, 0);
+  auto& input_ids_dims = input_ids_shape.dim();
+  if (input_ids_dims.size() != 2) {
+    fail_shape_inference("Inputs 0 shall be 2 dimensions");
+  }
+  if (!(input_ids_dims[0].has_dim_value() && input_ids_dims[1].has_dim_value())) {
+    return;
+  }
+
+  int64_t batch_size = input_ids_dims[0].dim_value();
+
+  const auto max_length = ctx.getInputData(1);
+  if (max_length == nullptr) {  // not initializer
+    return;
+  }
+
+  int max_length_value = 0;
+  if (!ParseScalar(max_length, max_length_value) || max_length_value <= 0) {
+    fail_shape_inference("Failed to parse max_length or it is not positive integer scalar");
+  }
+
+  ONNX_NAMESPACE::TensorShapeProto sequences_shape;
+  sequences_shape.add_dim()->set_dim_value(batch_size);
+  sequences_shape.add_dim()->set_dim_value(max_length_value);
+  updateOutputShape(ctx, 0, sequences_shape);
+}
+
 constexpr const char* Gelu_ver1_doc =
     R"DOC(Gaussian Error Linear Unit.
 A high-performing neural network activation function.The GELU nonlinearity is
@@ -519,6 +557,36 @@ ONNX_MS_OPERATOR_SET_SCHEMA(BiasGelu, 1,
                                     {"tensor(float16)", "tensor(float)", "tensor(double)", "tensor(bfloat16)"},
                                     "Constrain input and output types to float tensors.")
                                 .TypeAndShapeInferenceFunction(ONNX_NAMESPACE::propagateShapeAndTypeFromFirstInput));
+
+constexpr const char* QuickGelu_ver1_doc = R"DOC(Compute x * Sigmoid(alpha * x).)DOC";
+ONNX_MS_OPERATOR_SET_SCHEMA(
+    QuickGelu, 1,
+    OpSchema()
+        .SetDomain(kMSDomain)
+        .SinceVersion(1)
+        .SetDoc(QuickGelu_ver1_doc)
+        .Attr("alpha", "Alpha value.", AttributeProto::FLOAT, 1.702f)
+        .Input(0, "X", "The input data as Tensor.", "T")
+        .Output(0, "Y", "The output.", "T")
+        .TypeConstraint("T", {"tensor(float16)", "tensor(float)", "tensor(double)", "tensor(bfloat16)"},
+                        "Constrain input and output types to float tensors.")
+        .TypeAndShapeInferenceFunction(ONNX_NAMESPACE::propagateShapeAndTypeFromFirstInput)
+        .SetContextDependentFunctionBodyBuilder([](const FunctionBodyBuildContext& ctx, const OpSchema& schema,
+                                                   FunctionProto& functionProto) {
+          auto* tp = ctx.getInputType(0);
+          if ((tp == nullptr) || (!tp->has_tensor_type())) return false;
+          auto elem_type = (TensorProto_DataType)(tp->tensor_type().elem_type());
+          auto* alpha_attr = ctx.getAttribute("alpha");
+          float alpha = (alpha_attr != nullptr) ? alpha_attr->f() : 1.702f;
+          FunctionBuilder builder(functionProto);
+          builder.AddOpset("", 13).Const("Alpha", ToTensor(alpha, elem_type)).Add(R"(
+                CX = Mul (Alpha, X)
+                SIGMOIDCX = Sigmoid (CX)
+                Y = Mul (X, SIGMOIDCX)
+            )");
+          schema.BuildFunction(functionProto);
+          return true;
+        }));
 
 // Used to be ONNX 1.7 Inverse(12)
 // Comment out docs not to increase the binary size
@@ -723,8 +791,10 @@ ONNX_MS_OPERATOR_SET_SCHEMA(BiasSoftmax, 1,
                                 .SetDoc(
                                     "Y = softmax(scores + bias)) with simple broadcast on bias. "
                                     "Intended to specialize softmax(scores + additive_mask) commonly found in transformer models.")
-                                .Attr("softmax_axis", "apply softmax to elements for dimensions softmax_axis or higher", AttributeProto::INT, static_cast<int64_t>(1))
-                                .Attr("broadcast_axis", "broadcast bias across input for dimensions broadcast_axis to softmax_axis-1", AttributeProto::INT, static_cast<int64_t>(1))
+                                .Attr("axis", "apply softmax to elements for dimensions axis or higher", AttributeProto::INT, static_cast<int64_t>(1))
+                                .Attr("is_inner_broadcast", "true if broadcast bias across input for dimensions broadcast_axis to axis-1, "
+                                      "otherwise broadcast bias across input for dimensions 0 to broadcast_axis - 1",
+                                      AttributeProto::INT)
                                 .Input(0, "data", "The input data as Tensor.", "T")
                                 .Input(1, "bias", "The bias (or mask) as Tensor.", "T")
                                 .Output(0, "output", "The output.", "T")
@@ -989,6 +1059,31 @@ ONNX_MS_OPERATOR_SET_SCHEMA(BeamSearch, 1,
                                   BeamSearchShapeInference(ctx);
                                 }));
 
+ONNX_MS_OPERATOR_SET_SCHEMA(GreedySearch, 1,
+                            OpSchema()
+                                .SetDoc("Greedy Search for text generation.")
+                                .Attr("eos_token_id", "The id of the end-of-sequence token", AttributeProto::INT)
+                                .Attr("pad_token_id", "The id of the padding token", AttributeProto::INT)
+                                .Attr("decoder_start_token_id", "The id of the token that indicates decoding starts.", AttributeProto::INT, static_cast<int64_t>(-1))
+                                .Attr("no_repeat_ngram_size", "no repeat ngrams size", AttributeProto::INT, static_cast<int64_t>(0))
+                                .Attr("model_type", "model type: 0 for decoder only like GPT-2; 1 for encoder decoder like Bart", AttributeProto::INT, static_cast<int64_t>(0))
+                                .Attr("encoder", "The subgraph for initialization of encoder and decoder. It will be called once before decoder subgraph.", AttributeProto::GRAPH, OPTIONAL_VALUE)
+                                .Attr("decoder", "Decoder subgraph to execute in a loop.", AttributeProto::GRAPH)
+                                .Input(0, "input_ids", "The sequence used as a prompt for the generation. Shape is (batch_size, sequence_length)", "I")
+                                .Input(1, "max_length", "The maximum length of the sequence to be generated. Shape is (1)", "I")
+                                .Input(2, "min_length", "The minimum length below which the score of eos_token_id is set to -Inf. Shape is (1)", "I", OpSchema::Optional)
+                                .Input(3, "repetition_penalty", "The parameter for repetition penalty. Default value 1.0 means no penalty. Accepts value > 0.0. Shape is (1)", "T", OpSchema::Optional)
+                                .Input(4, "vocab_mask", "Mask of vocabulary. Words that masked with 0 are not allowed to be generated, and 1 is allowed. Shape is (vacab_size)", "I", OpSchema::Optional)
+                                .Input(5, "prefix_vocab_mask", "Mask of vocabulary for first step. Words that masked with 0 are not allowed to be generated, and 1 is allowed. Shape is (batch_size, vocab_size)", "I", OpSchema::Optional)
+                                .Input(6, "attention_mask", "Custom attention mask. Shape is (batch_size, sequence_length)", "I", OpSchema::Optional)
+                                .Output(0, "sequences", "Word IDs of generated sequences. Shape is (batch_size, max_sequence_length)", "I")
+                                // TODO(wy): support scores if needed.
+                                .TypeConstraint("T", {"tensor(float)"}, "Constrain input and output types to float tensors.")
+                                .TypeConstraint("I", {"tensor(int32)"}, "Constrain to integer types")
+                                .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+                                  GreedySearchShapeInference(ctx);
+                                }));
+
 ONNX_MS_OPERATOR_SET_SCHEMA(SampleOp, 1,
                             OpSchema()
                                 .Input(0, "X", "input", "T")
@@ -1231,7 +1326,8 @@ activation and leaky_relu_alpha.)DOC")
                                     "C",
                                     "Input tensor C. "
                                     "The shape of C should be unidirectional broadcastable to (M, N).",
-                                    "T")
+                                    "T",
+                                    OpSchema::Optional)
                                 .Output(0, "Y", "Output tensor of shape (M, N).", "T")
                                 .TypeConstraint(
                                     "T",
@@ -1691,14 +1787,14 @@ ONNX_MS_OPERATOR_SET_SCHEMA(WordConvEmbedding, 1,
                                 .Attr(
                                     "embedding_size",
                                     "Integer representing the embedding vector size for each word."
-                                    "If not provide, use the fileter size of conv weight",
+                                    "If not provide, use the filter size of conv weight",
                                     AttributeProto::INT,
                                     OPTIONAL_VALUE)
                                 .Attr(
                                     "conv_window_size",
                                     "This operator applies convolution to word from left to right with window equal to conv_window_size and stride to 1."
                                     "Take word 'example' for example, with conv_window_size equal to 2, conv is applied to [ex],[xa], [am], [mp]..."
-                                    "If not provide, use the first dimension of conv kernal shape.",
+                                    "If not provide, use the first dimension of conv kernel shape.",
                                     AttributeProto::INT,
                                     OPTIONAL_VALUE)
                                 .Attr(

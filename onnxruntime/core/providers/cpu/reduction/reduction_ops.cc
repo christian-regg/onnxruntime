@@ -6,8 +6,11 @@
 NNX_THIRD_PARTY_INCLUDES_START
 #undef check
 #undef TEXT
-#include "core/common/inlined_containers.h"
 #include "core/providers/cpu/reduction/reduction_ops.h"
+
+#include "core/common/inlined_containers.h"
+#include "core/common/narrow.h"
+#include "core/common/span_utils.h"
 #include "core/providers/common.h"
 NNX_THIRD_PARTY_INCLUDES_END // WITH_UE
 
@@ -238,9 +241,9 @@ bool operator!=(FastReduceKind a, FastReduceKind b) {
 
 bool ResultsNoTransposePrepareForReduce::equal(gsl::span<const int64_t> local_input_shape,
                                                gsl::span<const int64_t> local_reduced_axes) {
-  if (gsl::make_span(input_shape) != local_input_shape)
+  if (!SpanEq(gsl::make_span(input_shape), local_input_shape))
     return false;
-  if (gsl::make_span(reduced_axes) != local_reduced_axes)
+  if (!SpanEq(gsl::make_span(reduced_axes), local_reduced_axes))
     return false;
   return true;
 }
@@ -412,8 +415,8 @@ void NoTransposeReduce1Loop(Tensor* output, const TensorShape& new_input_shape, 
                             gsl::span<const int64_t> reduced_axes, concurrency::ThreadPool* tp,
                             ResultsNoTransposePrepareForReduce& last_results) {
   auto output_shape = output->Shape();
-  const typename AGG::input_type* from_data = input.template Data<typename AGG::input_type>();
-  typename AGG::value_type* to_data = output->template MutableData<typename AGG::value_type>();
+  const typename AGG::input_type* from_data = input.Data<typename AGG::input_type>();
+  typename AGG::value_type* to_data = output->MutableData<typename AGG::value_type>();
   int64_t count = output_shape.Size();
 
   if (reduced_axes.size() == 0 || reduced_axes.size() == new_input_shape.NumDimensions()) {
@@ -477,8 +480,8 @@ void NoTransposeReduce2Loops(Tensor* output, const TensorShape& new_input_shape,
                              gsl::span<const int64_t> reduced_axes, concurrency::ThreadPool* tp,
                              ResultsNoTransposePrepareForReduce& last_results) {
   auto output_shape = output->Shape();
-  const typename AGG::input_type* from_data = input.template Data<typename AGG::input_type>();
-  typename AGG::value_type* to_data = output->template MutableData<typename AGG::value_type>();
+  const typename AGG::input_type* from_data = input.Data<typename AGG::input_type>();
+  typename AGG::value_type* to_data = output->MutableData<typename AGG::value_type>();
   int64_t count = output_shape.Size();
 
   if (reduced_axes.size() == 0 || reduced_axes.size() == new_input_shape.NumDimensions()) {
@@ -572,7 +575,7 @@ FastReduceKind OptimizeShapeForFastReduce(gsl::span<const int64_t> input_shape,
   }
 
   InlinedHashSet<int64_t> axes;
-  const auto input_shape_size = gsl::narrow<int64_t>(input_shape.size());
+  const auto input_shape_size = narrow<int64_t>(input_shape.size());
   if (reduced_axes.size() == 0 && !noop_with_empty_axes) {
     for (int64_t i = 0; i < input_shape_size; ++i) {
       axes.insert(i);
@@ -610,7 +613,7 @@ FastReduceKind OptimizeShapeForFastReduce(gsl::span<const int64_t> input_shape,
     }
     if (noop_with_empty_axes) {
       fast_axes.clear();
-      fast_output_shape.assign(input_shape.cbegin(), input_shape.cend());
+      fast_output_shape.assign(input_shape.begin(), input_shape.end());
       return FastReduceKind::kK;
     } else {
       if (keep_dims) {
@@ -667,7 +670,7 @@ bool CommonFastReduceCopy(OpKernelContext* ctx, TensorShapeVector& input_axes, b
     const Tensor* axes_tensor = ctx->Input<Tensor>(1);
     ValidateCommonFastReduce(axes_tensor);
     auto nDims = static_cast<size_t>(axes_tensor->Shape()[0]);
-    const auto* data = axes_tensor->template Data<int64_t>();
+    const auto* data = axes_tensor->Data<int64_t>();
     input_axes.insert(input_axes.begin(), data, data + nDims);
     if (input_axes.empty() && noop_with_empty_axes) {
       const Tensor* input = ctx->Input<Tensor>(0);
@@ -804,8 +807,8 @@ void CommonReduce1Loop(OpKernelContext* ctx,
   if (fast_kind == FastReduceKind::kEmpty) {
     const TensorShape& new_input_shape = input->Shape();
     if (new_input_shape.Size() == 1) {
-      const typename AGG::input_type* from_data = input->template Data<typename AGG::input_type>();
-      typename AGG::value_type* to_data = output->template MutableData<typename AGG::value_type>();
+      const typename AGG::input_type* from_data = input->Data<typename AGG::input_type>();
+      typename AGG::value_type* to_data = output->MutableData<typename AGG::value_type>();
       AGG agg(1, *from_data);
       agg.update(*from_data);
       *to_data = agg.get_value();
@@ -835,8 +838,8 @@ void CommonReduce2Loops(OpKernelContext* ctx,
   if (fast_kind == FastReduceKind::kEmpty) {
     const TensorShape& new_input_shape = input->Shape();
     if (new_input_shape.Size() == 1) {
-      const typename AGG::input_type* from_data = input->template Data<typename AGG::input_type>();
-      typename AGG::value_type* to_data = output->template MutableData<typename AGG::value_type>();
+      const typename AGG::input_type* from_data = input->Data<typename AGG::input_type>();
+      typename AGG::value_type* to_data = output->MutableData<typename AGG::value_type>();
       AGG agg(1, *from_data);
       agg.update0(*from_data);
       agg.update(*from_data);
@@ -924,8 +927,8 @@ std::unique_ptr<Tensor> ReduceSum<T>::Impl(const Tensor& input, gsl::span<const 
 
   if (fast_kind == FastReduceKind::kEmpty) {
     if (new_input_shape.Size() == 1) {
-      const T* from_data = input.template Data<T>();
-      T* to_data = output->template MutableData<T>();
+      const T* from_data = input.Data<T>();
+      T* to_data = output->MutableData<T>();
       *to_data = *from_data;
     } else {
       ValidateKeepDims(new_input_shape, keep_dims);

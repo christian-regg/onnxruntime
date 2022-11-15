@@ -14,9 +14,9 @@ TrainingAgent::TrainingAgent(InferenceSession& session,
                              const std::vector<std::string>& bw_fetches_names,
                              const std::vector<OrtDevice>& bw_outputs_device_info,
                              int local_rank) : inference_session_(session) {
-ORT_UNUSED_PARAMETER(local_rank);
+  ORT_UNUSED_PARAMETER(local_rank);
 #if !defined(ORT_MINIMAL_BUILD) && defined(ORT_MEMORY_PROFILE)
-  MemoryInfo::SetLocalRank(local_rank);
+  inference_session_.GetMemoryProfiler().GetMemoryInfo().SetLocalRank(local_rank);
 #endif
   auto& session_state = session.GetSessionState();
   std::vector<std::string> fw_fetches_names;
@@ -57,14 +57,14 @@ TrainingAgent::~TrainingAgent() = default;
 common::Status TrainingAgent::RunForward(const std::vector<OrtValue>& feeds, std::vector<OrtValue>& fetches,
                                          PartialGraphExecutionState& state, const OrtValueCachePtr& cache) {
 #if !defined(ORT_MINIMAL_BUILD) && defined(ORT_MEMORY_PROFILE)
-  MemoryInfo::SetIteration(profile_step_);
+  inference_session_.GetMemoryProfiler().GetMemoryInfo().SetIteration(profile_step_);
   profile_step_ += 1;
 #endif
 
   state.SetProgramCounterStart(0);
   state.SetProgramCounterEnd(fw_program_counter_end_);
 
-  const int32_t partial_graph_index = 0;
+  constexpr int32_t partial_graph_index = 0;
   return RunCore(feeds, fetches, state, *fw_feeds_fetches_manager_, cache, partial_graph_index);
 }
 
@@ -72,7 +72,7 @@ common::Status TrainingAgent::RunBackward(const std::vector<OrtValue>& feeds, st
                                           PartialGraphExecutionState& state) {
   state.SetProgramCounterStart(fw_program_counter_end_);
   state.SetProgramCounterEnd(bw_program_counter_end_);
-  const int32_t partial_graph_index = 1;
+  constexpr int32_t partial_graph_index = 1;
   return RunCore(feeds, fetches, state, *bw_feeds_fetches_manager_, nullptr, partial_graph_index);
 }
 
