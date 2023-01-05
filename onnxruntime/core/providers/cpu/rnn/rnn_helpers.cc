@@ -330,11 +330,11 @@ constexpr float beta_6 = 1.19825839466702e-06f;
 constexpr float sigmoid_bound = 20.0f;
 constexpr float tanh_bound = 10.0f;
 
-#if defined(__GNUC__) && !defined(__wasm__)
+#if defined(__GNUC__) && !defined(__wasm__) && !defined(__PROSPERO__) // WITH_UE: Added PROSPERO
 #define restrict __restrict__
 #elif defined(_MSC_VER)
 #define restrict __restrict
-#else
+#elif !defined(__PROSPERO__) // WITH_UE: "else" updated to !PROSPERO
 #define restrict
 #endif
 

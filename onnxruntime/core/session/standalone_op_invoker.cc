@@ -83,8 +83,12 @@ void ReleaseNode(onnxruntime::Node* node) {
     delete node;
   }
 }
-
+#if defined(WITH_UE) && defined(__PROSPERO__)
+using NodePtr = std::shared_ptr<onnxruntime::Node>;
+#else
 using NodePtr = std::unique_ptr<onnxruntime::Node, void (*)(onnxruntime::Node*)>;
+#endif // WITH_UE
+
 using StandAloneNodesMap = InlinedHashMap<const onnxruntime::OpKernel*, NodePtr>;
 
 class NodeRepo {

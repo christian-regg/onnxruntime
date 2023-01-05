@@ -69,7 +69,14 @@ static inline size_t CalculateOffset(size_t inner_dim, const TensorPitches& inpu
 #if defined(_MSC_VER)
 #define FORCEINLINE __forceinline
 #else
+#ifdef WITH_UE
+//#ifndef __PROSPERO__
+#if (!defined(__PROSPERO__) && !defined(__clang__))
 #define FORCEINLINE __attribute__((always_inline)) inline
+#endif
+#else
+#define FORCEINLINE __attribute__((always_inline)) inline
+#endif
 #endif
 
 template <typename T>

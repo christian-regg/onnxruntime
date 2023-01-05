@@ -3,10 +3,17 @@
 
 #include "core/common/common.h"
 
+#include "NNXThirdPartyWarningDisabler.h" // WITH_UE
+NNX_THIRD_PARTY_INCLUDES_START
+#undef TEXT
+#undef check
+
 #ifdef _WIN32
 #include <Windows.h>
 #include <assert.h>
 #endif
+
+NNX_THIRD_PARTY_INCLUDES_END // WITH_UE
 
 #ifdef ORT_NO_EXCEPTIONS
 #if defined(__ANDROID__)

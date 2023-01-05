@@ -28,6 +28,11 @@
 #include <iostream>
 #endif
 
+#ifdef WITH_UE
+#include "GenericPlatform/GenericPlatformAffinity.h"
+#include "ORTExceptionHandler.h"
+#endif //WITH_UE
+
 /** \brief All C++ Onnxruntime APIs are defined inside this namespace
 * 
 */
@@ -48,6 +53,7 @@ struct Exception : std::exception {
   OrtErrorCode code_;
 };
 
+#ifndef WITH_UE
 #ifdef ORT_NO_EXCEPTIONS
 // The #ifndef is for the very special case where the user of this library wants to define their own way of handling errors.
 // NOTE: This header expects control flow to not continue after calling ORT_CXX_API_THROW
@@ -63,6 +69,13 @@ struct Exception : std::exception {
 #else
 #define ORT_CXX_API_THROW(string, code) \
   throw Ort::Exception(string, code)
+#endif
+
+// UE: Exception turned into UE's equivalent
+#else
+}
+namespace Ort {
+#define ORT_CXX_API_THROW(string, code) FORTExceptionHandler::ThrowPseudoException(string, code)
 #endif
 
 // This is used internally by the C++ API. This class holds the global variable that points to the OrtApi, it's in a template so that we can define a global variable in a header and make
@@ -350,6 +363,7 @@ struct SessionOptions : Base<OrtSessionOptions> {
 
   SessionOptions& SetIntraOpNumThreads(int intra_op_num_threads);                              ///< Wraps OrtApi::SetIntraOpNumThreads
   SessionOptions& SetInterOpNumThreads(int inter_op_num_threads);                              ///< Wraps OrtApi::SetInterOpNumThreads
+  SessionOptions& SetPriorityOpThreads(EThreadPriority ThreadPri); // WITH_UE
   SessionOptions& SetGraphOptimizationLevel(GraphOptimizationLevel graph_optimization_level);  ///< Wraps OrtApi::SetSessionGraphOptimizationLevel
 
   SessionOptions& EnableCpuMemArena();   ///< Wraps OrtApi::EnableCpuMemArena
@@ -1226,4 +1240,13 @@ struct CustomOpBase : OrtCustomOp {
 
 }  // namespace Ort
 
-#include "onnxruntime_cxx_inline.h"
+#include "onnxruntime_cxx_inline.imp" // WITH_UE: .h replaced by .imp
+
+#ifdef WITH_UE // Added here rather than in "onnxruntime_cxx_inline.imp" to avoid modifying that file
+namespace Ort {
+  inline SessionOptions& SessionOptions::SetPriorityOpThreads(EThreadPriority ThreadPri) {
+    ThrowOnError(GetApi().SetPriorityOpThreads(p_, ThreadPri));
+    return *this;
+  }
+}  // namespace Ort
+#endif
