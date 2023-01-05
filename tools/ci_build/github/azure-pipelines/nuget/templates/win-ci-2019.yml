@@ -22,6 +22,7 @@ parameters:
   EnableLto: true
   # Controls whether unreleased onnx opsets are allowed. Default is set to 1
   AllowReleasedOpsetOnly: '0'
+  IsReleaseBuild: false
 jobs:
 - job: ${{ parameters.JobName }}
   timeoutInMinutes: 200
@@ -71,9 +72,9 @@ jobs:
         versionSpec: '16.x'
 
     - task: UsePythonVersion@0
-      inputs: 
-        versionSpec: '3.7' 
-        addToPath: true 
+      inputs:
+        versionSpec: '3.7'
+        addToPath: true
         architecture: ${{ parameters.BuildArch }}
 
     - task: BatchScript@1
@@ -94,10 +95,10 @@ jobs:
        $Env:CMAKE_ARGS="-DONNX_USE_PROTOBUF_SHARED_LIBS=OFF -DProtobuf_USE_STATIC_LIBS=ON -DONNX_USE_LITE_PROTO=ON -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=${{ parameters.BuildArch }}-windows-static"
        python setup.py bdist_wheel
        python -m pip uninstall -y onnx -qq
-       Get-ChildItem -Path dist/*.whl | foreach {pip --disable-pip-version-check install --upgrade $_.fullname}   
+       Get-ChildItem -Path dist/*.whl | foreach {pip --disable-pip-version-check install --upgrade $_.fullname}
       workingDirectory: '$(Build.SourcesDirectory)\cmake\external\onnx'
       displayName: 'Install ONNX'
-    
+
     - task: PythonScript@0
       displayName: 'Generate cmake config'
       inputs:
@@ -152,10 +153,15 @@ jobs:
           solution: '$(Build.SourcesDirectory)\csharp\OnnxRuntime.CSharp.sln'
           configuration: '$(BuildConfig)'
           platform: 'Any CPU'
-          msbuildArguments: '-p:OnnxRuntimeBuildDirectory="$(Build.BinariesDirectory)" -p:OrtPackageId=${{ parameters.OrtPackageId }}'
+          msbuildArguments: '-p:OnnxRuntimeBuildDirectory="$(Build.BinariesDirectory)" -p:OrtPackageId=${{ parameters.OrtPackageId }} -p:IsReleaseBuild=${{ parameters.IsReleaseBuild }}'
           workingDirectory: '$(Build.SourcesDirectory)\csharp'
 
-    - ${{ if in(parameters['sln_platform'], 'Win32', 'x64') }}:      
+      - script: |
+         mklink /D /J models C:\local\models
+        workingDirectory: '$(Build.BinariesDirectory)'
+        displayName: 'Create models link'
+
+    - ${{ if in(parameters['sln_platform'], 'Win32', 'x64') }}:
       - ${{ if eq(parameters.BuildCSharp, true) }}:
         - task: DotNetCoreCLI@2
           displayName: 'Test C#'
@@ -168,7 +174,7 @@ jobs:
 
       - ${{ if eq(parameters.RunTests, true) }}:
         - script: |
-           mklink  /D /J $(Build.BinariesDirectory)\$(BuildConfig)\models $(Build.BinariesDirectory)\models
+           mklink  /D /J $(Build.BinariesDirectory)\$(BuildConfig)\models C:\local\models
            DIR dist\ /S /B > wheel_filename_file
            set /p WHEEL_FILENAME=<wheel_filename_file
            del wheel_filename_file
@@ -222,13 +228,13 @@ jobs:
           artifactName: ${{ parameters.ArtifactName }}
           targetPath: '$(Build.ArtifactStagingDirectory)'
 
-      - task: PublishSymbols@2
-        displayName: 'Publish Build Symbols'
-        condition: eq(variables['IsReleaseBuild'], 'true')
-        inputs:
-          symbolsFolder: '$(Build.BinariesDirectory)\RelWithDebInfo\RelWithDebInfo'
-          searchPattern: '**/*.pdb'
-          symbolServerType: teamServices
+      - ${{ if eq(parameters['IsReleaseBuild'], 'true') }}:
+        - task: PublishSymbols@2
+          displayName: 'Publish Build Symbols'          
+          inputs:
+            symbolsFolder: '$(Build.BinariesDirectory)\RelWithDebInfo\RelWithDebInfo'
+            searchPattern: '**/*.pdb'
+            symbolServerType: teamServices
 
     # Node.js Publish
     - ${{ if eq(parameters['DoNodejsPack'], 'true') }}:
