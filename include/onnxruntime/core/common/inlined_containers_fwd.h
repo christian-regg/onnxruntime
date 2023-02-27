@@ -6,6 +6,7 @@
 #include <memory>
 #include <utility>
 
+#ifndef DISABLE_ABSEIL
 #ifdef _MSC_VER
 #pragma warning(push)
 // C4127: conditional expression is constant
@@ -13,7 +14,7 @@
 // C4324: structure was padded due to alignment specifier
 // Usage of alignas causes some internal padding in places.
 #pragma warning(disable : 4324)
-#endif
+#endif // _MSC_VER
 
 #include "ThirdPartyWarningDisabler.h" // WITH_UE
 NNI_THIRD_PARTY_INCLUDES_START
@@ -24,7 +25,13 @@ NNI_THIRD_PARTY_INCLUDES_END // WITH_UE
 
 #ifdef _MSC_VER
 #pragma warning(pop)
-#endif
+#endif // _MSC_VER
+
+#else
+
+#include <vector>
+
+#endif // DISABLE_ABSEIL
 
 // Forward declarations for contexts where abseil can not be compiled and
 // not really needed but we want to have it in the headers that are included
@@ -43,6 +50,7 @@ NNI_THIRD_PARTY_INCLUDES_END // WITH_UE
 // CalculateSmallVectorDefaultInlinedElements<T>() and its comments.
 
 namespace onnxruntime {
+#ifndef DISABLE_ABSEIL
 /// Inspired by LLVM SmallVector with ONNX Runtime adjustments for abseil.
 ///
 /// Helper class for calculating the default number of inline elements for
@@ -108,6 +116,15 @@ template <typename T,
           typename Allocator = std::allocator<T>>
 using InlinedVector = absl::InlinedVector<T, N, Allocator>;
 
+#else
+
+template <typename T,
+          size_t N = 0,
+          typename Allocator = std::allocator<T>>
+using InlinedVector = std::vector<T, Allocator>;
+
+#endif // DISABLE_ABSEIL
+
 template <typename T,
           typename Allocator = std::allocator<T>>
 class InlinedHashSet;
@@ -116,11 +133,11 @@ template <typename Key, typename Value,
           typename Allocator = std::allocator<std::pair<const Key, Value>>>
 class InlinedHashMap;
 
-template <typename T, typename Alloc = std::allocator<T>>
+template <typename T, typename Allocator = std::allocator<T>>
 class NodeHashSet;
 
 template <typename Key, typename Value, 
-          typename Alloc = std::allocator<std::pair<const Key, Value>>>
+          typename Allocator = std::allocator<std::pair<const Key, Value>>>
 class NodeHashMap;
-
 }
+
