@@ -4,6 +4,7 @@
 #pragma once
 
 #if !defined(ORT_MINIMAL_BUILD)
+
 #include "core/graph/onnx_protobuf.h"
 #include "core/graph/graph.h"
 #include "core/common/inlined_containers.h"

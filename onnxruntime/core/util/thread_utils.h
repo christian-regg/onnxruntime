@@ -36,6 +36,8 @@ struct OrtThreadPoolParams {
   OrtCustomCreateThreadFn custom_create_thread_fn = nullptr;
   void* custom_thread_creation_options = nullptr;
   OrtCustomJoinThreadFn custom_join_thread_fn = nullptr;
+
+  EThreadPriority ThreadPri = EThreadPriority::TPri_Normal; // WITH_UE: Unreal Engine thread priority level
 };
 
 struct OrtThreadingOptions {

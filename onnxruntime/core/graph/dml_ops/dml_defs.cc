@@ -1,3 +1,5 @@
+#ifdef PLATFORM_WIN64 // WITH_UE
+
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
@@ -341,3 +343,4 @@ void RegisterDmlSchemas() {
 }
 }  // namespace dml
 }  // namespace onnxruntime
+#endif // PLATFORM_WIN64

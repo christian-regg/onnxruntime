@@ -64,10 +64,27 @@ using IndexedSubGraph_MetaDef = IndexedSubGraph::MetaDef;
 #include "core/common/logging/logging.h"
 #include "core/providers/shared_library/provider_interfaces.h"
 
+#ifdef WITH_UE
+struct ProviderInfo_CUDAandROCM{
+  std::unique_ptr<onnxruntime::IAllocator> CreateCUDAPinnedAllocator(int16_t, const char*) {return nullptr;}
+  std::unique_ptr<onnxruntime::IAllocator> CreateROCMPinnedAllocator(int16_t, const char*) {return nullptr;}
+  void CopyGpuToCpu(void*, const void*, const size_t, const OrtMemoryInfo&, const OrtMemoryInfo&) {}
+  OrtStatus* GetCurrentGpuDeviceId(int*) {return nullptr;}
+  OrtStatus* SetCurrentGpuDeviceId(int) {return nullptr;}
+  void cudaMemcpy_HostToDevice(void*, const void*, size_t) {}
+  void rocmMemcpy_HostToDevice(void*, const void*, size_t) {}
+};
+using ProviderInfo_CUDA = ProviderInfo_CUDAandROCM;
+using ProviderInfo_ROCM = ProviderInfo_CUDAandROCM;
+
+#else
 #include "core/providers/cuda/cuda_provider_factory.h"
 #include "core/providers/rocm/rocm_provider_factory.h"
+#endif //WITH_UE
 #include "core/providers/dnnl/dnnl_provider_factory.h"
+#ifndef WITH_UE 
 #include "core/providers/migraphx/migraphx_provider_factory.h"
+#endif //WITH_UE
 #include "core/providers/openvino/openvino_provider_factory.h"
 #include "core/providers/tensorrt/tensorrt_provider_factory.h"
 #include "core/providers/tensorrt/tensorrt_provider_options.h"

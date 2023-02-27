@@ -25,6 +25,8 @@
 #include "onnx/onnx-operators_pb.h"
 #endif
 
+#undef check // WITH_UE
+
 namespace onnxruntime {
 namespace utils {
 

@@ -8,7 +8,7 @@
 #ifdef _MSC_VER
 #include <codecvt>
 #include <locale.h>
-#elif defined(__APPLE__) or defined(__ANDROID__)
+#elif defined(__APPLE__) || defined(__ANDROID__) || (__PROSPERO__) // WITH_UE: Added PROSPERO
 #include <codecvt>
 #else
 #include <limits>
@@ -18,6 +18,10 @@
 #include <locale>
 #include <functional>
 #include <unordered_set>
+
+// WITH_UE: Fix multiple warning C4996: 'X': warning STL4017: std::wbuffer_convert, std::wstring_convert, and the <codecvt> header (containing [...]) are deprecated in C++17 [...]
+#include "ThirdPartyWarningDisabler.h"
+NNI_THIRD_PARTY_INCLUDES_START
 
 namespace onnxruntime {
 
@@ -110,7 +114,7 @@ class Locale {
   std::locale loc_;
 };
 
-#if defined(__APPLE__) or defined(__ANDROID__)
+#if defined(__APPLE__) || defined(__ANDROID__) || (__PROSPERO__) // WITH_UE: Added PROSPERO
 using Utf8Converter = std::wstring_convert<std::codecvt_utf8<wchar_t>>;
 #else
 
@@ -389,3 +393,5 @@ Status StringNormalizer::Compute(OpKernelContext* ctx) const {
   return status;
 }
 }  // namespace onnxruntime
+
+NNI_THIRD_PARTY_INCLUDES_END // WITH_UE

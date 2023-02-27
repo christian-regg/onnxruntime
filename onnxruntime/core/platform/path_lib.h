@@ -8,8 +8,17 @@
 #include <assert.h>
 #include <stdexcept>
 #ifdef _WIN32
+#include "ThirdPartyWarningDisabler.h" // WITH_UE
+NNI_THIRD_PARTY_INCLUDES_START
+#undef check
+#undef TEXT
 #include <Windows.h>
+NNI_THIRD_PARTY_INCLUDES_END // WITH_UE
 #include <time.h>  //strftime
+#elif __PROSPERO__ // WITH_UE
+#include <sys/types.h>
+#include <time.h>    //strftime
+#include <stddef.h>  //ptrdiff_t
 #else
 #include <sys/types.h>
 #include <dirent.h>
@@ -244,6 +253,7 @@ inline OrtFileType DTToFileType(unsigned char t) {
 
 template <typename T>
 void LoopDir(const std::string& dir_name, T func) {
+#ifndef __PROSPERO__ // WITH_UE
   DIR* dir = opendir(dir_name.c_str());
   if (dir == nullptr) {
     auto e = errno;
@@ -275,6 +285,30 @@ void LoopDir(const std::string& dir_name, T func) {
     ORT_RETHROW;
   }
   closedir(dir);
+
+#else //__PROSPERO__
+  int fd = sceKernelOpen(dir_name.c_str(), SCE_KERNEL_O_RDWR, SCE_KERNEL_O_SYNC);
+  if (fd < 0) {
+    std::ostringstream oss;
+    oss << "couldn't open '" << dir_name << "': Error code" << fd;
+    std::string s = oss.str();
+    ORT_THROW(s);
+  }
+
+  ORT_TRY{
+    SceKernelStat sb;
+    sceKernelFstat(fd, &sb);
+    const int buf_size = sb.st_blksize;
+    std::unique_ptr<char[]> buf = std::make_unique<char[]>(buf_size);
+    int num_bytes_written = 0;
+    while ((num_bytes_written = sceKernelGetdents(fd, buf.get(), buf_size)) > 0) {
+      SceKernelDirent* dirent_from_char = reinterpret_cast<SceKernelDirent*>(buf.get());
+      if (!func(dirent_from_char->d_name, DTToFileType(dirent_from_char->d_type))) {
+        break;
+      }
+    }
+  }
+#endif //__PROSPERO__
 }
 #endif
 template <typename T>

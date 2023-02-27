@@ -2271,8 +2271,17 @@ Second example, if we wanted to add and remove some members, we'd do this:
     In GetApi we now make it return ort_api_3 for version 3.
 */
 
+#ifdef WITH_UE // I should add this to ort_apis.h/abi_session_options.cc, but this avoids those 2 files to be modified
+ORT_API_STATUS_IMPL(/*OrtApis::*/SetPriorityOpThreads, _Inout_ OrtSessionOptions* options, EThreadPriority ThreadPri) {
+	options->value.intra_op_param.ThreadPri = ThreadPri;
+	options->value.inter_op_param.ThreadPri = ThreadPri;
+	return nullptr;
+}
+#endif //WITH_UE
+
 static constexpr OrtApi ort_api_1_to_12 = {
     // NOTE: The ordering of these fields MUST not change after that version has shipped since existing binaries depend on this ordering.
+
 
     // Shipped as version 1 - DO NOT MODIFY (see above text for more information)
     &OrtApis::CreateStatus,
@@ -2513,6 +2522,7 @@ static constexpr OrtApi ort_api_1_to_12 = {
     &OrtApis::SynchronizeBoundInputs,
     &OrtApis::SynchronizeBoundOutputs,
     // End of Version 10 - DO NOT MODIFY ABOVE (see above text for more information)
+	&/*OrtApis::*/SetPriorityOpThreads, // WITH_UE: Put at the very end of this static ort_api_1_to_11 to avoid "Size of version X API cannot change" error
 
     &OrtApis::SessionOptionsAppendExecutionProvider_CUDA_V2,
     &OrtApis::CreateCUDAProviderOptions,
@@ -2521,6 +2531,7 @@ static constexpr OrtApi ort_api_1_to_12 = {
     &OrtApis::ReleaseCUDAProviderOptions,
     &OrtApis::SessionOptionsAppendExecutionProvider_MIGraphX,
     // End of Version 11 - DO NOT MODIFY ABOVE (see above text for more information)
+
 };
 
 // Asserts to do a some checks to ensure older Versions of the OrtApi never change (will detect an addition or deletion but not if they cancel out each other)
@@ -2535,7 +2546,11 @@ static_assert(offsetof(OrtApi, GetCurrentGpuDeviceId) / sizeof(void*) == 161, "S
 static_assert(offsetof(OrtApi, CreateSessionFromArrayWithPrepackedWeightsContainer) / sizeof(void*) == 169, "Size of version 8 API cannot change");
 static_assert(offsetof(OrtApi, GetSparseTensorIndices) / sizeof(void*) == 191, "Size of version 9 API cannot change");
 static_assert(offsetof(OrtApi, SynchronizeBoundOutputs) / sizeof(void*) == 203, "Size of version 10 API cannot change");
-static_assert(offsetof(OrtApi, SessionOptionsAppendExecutionProvider_MIGraphX) / sizeof(void*) == 209, "Size of version 11 API cannot change");
+#ifndef WITH_UE 
+static_assert(offsetof(OrtApi, SessionOptionsAppendExecutionProvider_MIGraphX) / sizeof(void*) == 209, "Size of version 11 API cannot change"); 
+#else
+static_assert(offsetof(OrtApi, SessionOptionsAppendExecutionProvider_MIGraphX) / sizeof(void*) == (210), "Size of version 11 API cannot change");
+#endif // WITH_UE
 
 // So that nobody forgets to finish an API version, this check will serve as a reminder:
 static_assert(std::string_view(ORT_VERSION) == "1.12.0", "ORT_Version change detected, please follow below steps to ensure OrtApi is updated properly");

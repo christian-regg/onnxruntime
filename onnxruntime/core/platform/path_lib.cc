@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#include "Misc/Paths.h" // WITH_UE
 #include "core/platform/path_lib.h"
 
 #include <cassert>
@@ -24,6 +25,9 @@
 #include <PathCch.h>
 #pragma comment(lib, "PathCch.lib")
 #endif
+#elif defined(__PROSPERO__) // WITH_UE
+#include <stdlib.h>
+#include <sys/stat.h>
 #else
 #include <libgen.h>
 #include <stdlib.h>
@@ -31,7 +35,7 @@
 #include <string.h>
 #endif
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(PLATFORM_SCARLET) // WITH_UE: Added PLATFORM_SCARLET
 namespace onnxruntime {
 
 namespace {
@@ -110,23 +114,60 @@ namespace {
 
 inline std::unique_ptr<char[]> StrDup(const std::string& input) {
   auto buf = std::make_unique<char[]>(input.size() + 1);
+#if !defined(PLATFORM_SCARLET) // WITH_UE: Code not for PLATFORM_SCARLET
   strncpy(buf.get(), input.c_str(), input.size());
+#else // WITH_UE
+  strncpy_s(buf.get(), input.size() + 1, input.c_str(), input.size());
+#endif // WITH_UE
   buf[input.size()] = 0;
   return buf;
 }
 
 }  // namespace
 
+#ifdef PLATFORM_SCARLET // WITH_UE
+std::wstring s2ws(const std::string& s)
+{
+  int slength = (int)s.length() + 1;
+  int len = MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, 0, 0);
+  wchar_t* buf = new wchar_t[len];
+  MultiByteToWideChar(CP_ACP, 0, s.c_str(), slength, buf, len);
+  std::wstring r(buf);
+  delete[] buf;
+  return r;
+}
+#endif //PLATFORM_SCARLET
+
 common::Status GetDirNameFromFilePath(const std::basic_string<ORTCHAR_T>& input,
                                       std::basic_string<ORTCHAR_T>& output) {
+#if defined(__PROSPERO__) || defined(PLATFORM_SCARLET) // WITH_UE
+  FString IntputFString = FString(input.c_str());
+  FString DirPath = FPaths::GetPath(IntputFString);
+
+#ifndef PLATFORM_SCARLET // WITH_UE
+  output = std::string(TCHAR_TO_UTF8(*DirPath));
+#else //PLATFORM_SCARLET
+  std::string output_8bits = std::string(TCHAR_TO_UTF8(*DirPath));
+  output = s2ws(output_8bits);
+#endif //PLATFORM_SCARLET
+
+#else // WITH_UE
   auto s = StrDup(input);
   output = dirname(s.get());
+#endif // WITH_UE
   return Status::OK();
 }
 
 std::string GetLastComponent(const std::string& input) {
+
+#if defined(__PROSPERO__) || defined(PLATFORM_SCARLET) // WITH_UE
+  FString IntputFString = FString(input.c_str());
+  FString BaseName = FPaths::GetCleanFilename(IntputFString);
+  std::string ret = std::string(TCHAR_TO_UTF8(*BaseName));
+#else // WITH_UE
   auto s = StrDup(input);
   std::string ret = basename(s.get());
+#endif // WITH_UE
   return ret;
 }
 
