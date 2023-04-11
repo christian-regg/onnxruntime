@@ -47,7 +47,7 @@ class TensorAllocatorWithMemPattern : public ITensorAllocator {
       } else {
         buffer = alloc->Alloc(peak_size);
       }
-      weights_buffers_.push_back(BufferUniquePtr(buffer, alloc));
+      weights_buffers_.push_back(BufferUniquePtr(buffer, BufferDeleter(alloc)));
       auto kvp = buffers_.insert(std::make_pair(location, buffer));
       if (!kvp.second) {
         alloc->Free(buffer);
@@ -74,7 +74,7 @@ class TensorAllocatorWithMemPattern : public ITensorAllocator {
     return Status::OK();
   }
 
-  common::Status GetPreallocatedBuffer(int ort_value_index, const char* name,
+  common::Status GetPreallocatedBuffer(int ort_value_index, const std::string& name,
                                        std::optional<MemBuffer>& buf_out, AllocatorPtr& alloc_out) override {
     if (!is_sealed_) {
       return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Internal error.");

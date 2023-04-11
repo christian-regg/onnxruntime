@@ -5,6 +5,8 @@
 
 #include "contrib_ops/cpu/transformers/beam_search_impl_base.h"
 
+#include "core/common/span_utils.h"
+
 namespace onnxruntime {
 namespace contrib {
 
@@ -15,23 +17,27 @@ template <typename T>
 class BeamSearchGpt : public BeamSearchBase<T> {
  public:
   BeamSearchGpt(OpKernelContextInternal& context,
+                const SessionState* init_run_decoder_session_state,
+                GptSubgraph* init_run_gpt_subgraph,
                 const SessionState& decoder_session_state,
                 GptSubgraph& gpt_subgraph,
                 concurrency::ThreadPool* thread_pool,
-                void* cuda_stream,
+                Stream* ort_stream,
                 IConsoleDumper* cuda_dumper,
                 BeamSearchParameters& params,
-                const BeamSearchDeviceHelper::CreateGptInputsFunc& create_inputs_func,
-                const BeamSearchDeviceHelper::AddToFeedsFunc& add_to_feeds_func,
-                const BeamSearchDeviceHelper::TopkFunc& topk_func,
-                const BeamSearchDeviceHelper::ProcessLogitsFunc<T>& process_logits_func,
-                const BeamSearchDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func,
-                const BeamSearchDeviceHelper::DeviceCopyFunc<float>& device_copy_func,
-                const BeamSearchDeviceHelper::DeviceCopyFunc<int32_t>& device_copy_int32_func,
-                const BeamSearchDeviceHelper::UpdateGptFeedsFunc<T>& update_feeds_func)
+                const GenerationDeviceHelper::CreateGptInputsFunc& create_inputs_func,
+                const GenerationDeviceHelper::AddToFeedsFunc& add_to_feeds_func,
+                const GenerationDeviceHelper::TopkFunc& topk_func,
+                const GenerationDeviceHelper::ProcessLogitsFunc<T>& process_logits_func,
+                const GenerationDeviceHelper::InitBeamStateFunc<T>& init_beam_state_func,
+                const GenerationDeviceHelper::DeviceCopyFunc<float>& device_copy_func,
+                const GenerationDeviceHelper::DeviceCopyFunc<int32_t>& device_copy_int32_func,
+                const GenerationDeviceHelper::UpdateGptFeedsFunc<T>& update_feeds_func)
       : BeamSearchBase<T>(context, decoder_session_state, thread_pool,
-                          cuda_stream, cuda_dumper, params,
+                          ort_stream, cuda_dumper, params,
                           topk_func, process_logits_func, device_copy_func, device_copy_int32_func),
+        init_run_decoder_session_state_(init_run_decoder_session_state),
+        init_run_gpt_subgraph_(init_run_gpt_subgraph),
         gpt_subgraph_(gpt_subgraph),
         create_inputs_func_(create_inputs_func),
         add_to_feeds_func_(add_to_feeds_func),
@@ -41,7 +47,8 @@ class BeamSearchGpt : public BeamSearchBase<T> {
 
   // Execute beam search in iterations util stopping criteria is reached.
   // In each iteration, GPT subgraph is called, and next token for each sequence is generated.
-  Status Execute(const FeedsFetchesManager& feeds_fetches_manager);
+  Status Execute(const FeedsFetchesManager* init_run_feeds_fetches_manager,
+                 const FeedsFetchesManager& feeds_fetches_manager);
 
  private:
   // Prepare the inputs for first inference of subgraph
@@ -56,16 +63,19 @@ class BeamSearchGpt : public BeamSearchBase<T> {
       std::vector<OrtValue>& next_inputs,
       int current_length,
       OrtValue& position_ids,
+      bool increase_position,
       gsl::span<const int32_t> beam_next_tokens,
       gsl::span<const int32_t> beam_indices);
 
+  const SessionState* init_run_decoder_session_state_ = nullptr;
+  GptSubgraph* init_run_gpt_subgraph_ = nullptr;
   GptSubgraph& gpt_subgraph_;
 
   // Device specific functions
-  BeamSearchDeviceHelper::CreateGptInputsFunc create_inputs_func_;
-  BeamSearchDeviceHelper::AddToFeedsFunc add_to_feeds_func_;
-  BeamSearchDeviceHelper::InitBeamStateFunc<T> init_beam_state_func_;
-  BeamSearchDeviceHelper::UpdateGptFeedsFunc<T> update_feeds_func_;
+  GenerationDeviceHelper::CreateGptInputsFunc create_inputs_func_;
+  GenerationDeviceHelper::AddToFeedsFunc add_to_feeds_func_;
+  GenerationDeviceHelper::InitBeamStateFunc<T> init_beam_state_func_;
+  GenerationDeviceHelper::UpdateGptFeedsFunc<T> update_feeds_func_;
 };
 
 template <typename T>
@@ -75,16 +85,35 @@ Status BeamSearchGpt<T>::CreateInitialFeeds(gsl::span<int32_t>& sequence_lengths
                                             IAllocatorUniquePtr<char>& buffer) {
   const OrtValue* input_ids_value = this->context_.GetInputOrtValue(0);
   const Tensor& input_ids = input_ids_value->Get<Tensor>();
+  const OrtValue* attn_mask_value = this->context_.GetInputOrtValue(9);
+
+  if (init_run_gpt_subgraph_ != nullptr) {
+    return init_run_gpt_subgraph_->CreateInitialFeeds(input_ids,
+                                                      this->implicit_inputs_,
+                                                      this->parameters_->num_beams,
+                                                      this->parameters_->pad_token_id,
+                                                      sequence_lengths,
+                                                      expanded_input_ids,
+                                                      attn_mask_value,
+                                                      feeds,
+                                                      this->create_inputs_func_,
+                                                      this->add_to_feeds_func_,
+                                                      buffer,
+                                                      this->ort_stream_);
+  }
+
   return gpt_subgraph_.CreateInitialFeeds(input_ids,
                                           this->implicit_inputs_,
                                           this->parameters_->num_beams,
                                           this->parameters_->pad_token_id,
                                           sequence_lengths,
                                           expanded_input_ids,
+                                          attn_mask_value,
                                           feeds,
                                           this->create_inputs_func_,
                                           this->add_to_feeds_func_,
-                                          buffer);
+                                          buffer,
+                                          this->ort_stream_);
 }
 
 template <typename T>
@@ -93,24 +122,28 @@ Status BeamSearchGpt<T>::UpdateFeeds(
     std::vector<OrtValue>& next_inputs,
     int current_length,
     OrtValue& position_ids,
+    bool increase_position,
     gsl::span<const int32_t> beam_next_tokens,
     gsl::span<const int32_t> beam_indices) {
   return update_feeds_func_(this->temp_space_allocator_,
-                            this->cuda_stream_,
+                            this->ort_stream_,
                             last_outputs,
                             next_inputs,
                             current_length,
                             position_ids,
+                            increase_position,
                             beam_next_tokens,
                             beam_indices,
                             this->parameters_->num_beams,
                             gpt_subgraph_.GetFirstPastInputIndex(),
                             gpt_subgraph_.GetFirstPresentOutputIndex(),
-                            this->GetConsoleDumper());
+                            false,
+                            -1);
 }
 
 template <typename T>
-Status BeamSearchGpt<T>::Execute(const FeedsFetchesManager& feeds_fetches_manager) {
+Status BeamSearchGpt<T>::Execute(const FeedsFetchesManager* init_run_feeds_fetches_manager,
+                                 const FeedsFetchesManager& feeds_fetches_manager) {
   auto status = Status::OK();
   const BeamSearchParameters* parameters = this->parameters_;
   int64_t sequences_dims[] = {parameters->batch_size, parameters->num_return_sequences, parameters->max_length};
@@ -176,7 +209,7 @@ Status BeamSearchGpt<T>::Execute(const FeedsFetchesManager& feeds_fetches_manage
                         cpu_state.sequence_lengths,
                         parameters->batch_size,
                         parameters->num_beams,
-                        this->cuda_stream_);
+                        this->ort_stream_);
 
   gsl::span<const int32_t> input_ids = expanded_input_ids_in_cpu.Get<Tensor>().DataAsSpan<int32_t>();
   cpu_state.SetSequence(input_ids,
@@ -184,13 +217,9 @@ Status BeamSearchGpt<T>::Execute(const FeedsFetchesManager& feeds_fetches_manage
                         parameters->max_length,
                         parameters->sequence_length);
 
-#ifdef DEBUG_BEAM_SEARCH
+#ifdef DEBUG_GENERATION
   const IConsoleDumper* dumper = this->GetConsoleDumper();
-  dumper->Print("input_ids", feeds[0]);
-  dumper->Print("position_ids", feeds[1]);
-  dumper->Print("attention_mask", feeds[2]);
 #endif
-
   // Position ids for all iterations except the first. It uses memory buffer owned by next_positions.
   OrtValue position_ids;
   int64_t dims[] = {parameters->BatchBeamSize(), 1};
@@ -204,20 +233,49 @@ Status BeamSearchGpt<T>::Execute(const FeedsFetchesManager& feeds_fetches_manage
   int current_length = parameters->sequence_length;
   int iteration_counter = 0;
   while (current_length < parameters->max_length) {
-    iteration_counter++;
-#ifdef DEBUG_BEAM_SEARCH
+#ifdef DEBUG_GENERATION
     auto cur_len = std::to_string(current_length);
     dumper->Print("***CurrentLength", cur_len, true);
+    dumper->Print("iteration", iteration_counter, true);
+
+    dumper->Print("input_ids", feeds[0]);
+    dumper->Print("position_ids", feeds[1]);
+    dumper->Print("attention_mask", feeds[2]);
+    for (size_t i = 3; i < feeds.size(); i++) {
+      dumper->Print("past", static_cast<int>(i) - 3, true);
+      dumper->Print("", feeds[i]);
+    }
 #endif
 
-    status = utils::ExecuteSubgraph(this->decoder_session_state_,
-                                    feeds_fetches_manager,
-                                    feeds,
-                                    fetches,
-                                    {},
-                                    ExecutionMode::ORT_SEQUENTIAL,
-                                    this->context_.GetTerminateFlag(),
-                                    this->context_.Logger());
+    // For the first iteration use the init_run_decoder subgraph (if present)
+    if (iteration_counter++ == 0 &&
+        init_run_decoder_session_state_ != nullptr) {
+#ifdef DEBUG_NODE_INPUTS_OUTPUTS
+      const_cast<SessionState*>(this->init_run_decoder_session_state_)->IncrementGraphExecutionCounter();
+#endif
+      status = utils::ExecuteSubgraph(*init_run_decoder_session_state_,
+                                      *init_run_feeds_fetches_manager,
+                                      feeds,
+                                      fetches,
+                                      {},
+                                      ExecutionMode::ORT_SEQUENTIAL,
+                                      this->context_.GetTerminateFlag(),
+                                      this->context_.Logger(),
+                                      this->ort_stream_);
+    } else {
+#ifdef DEBUG_NODE_INPUTS_OUTPUTS
+      const_cast<SessionState&>(this->decoder_session_state_).IncrementGraphExecutionCounter();
+#endif
+      status = utils::ExecuteSubgraph(this->decoder_session_state_,
+                                      feeds_fetches_manager,
+                                      feeds,
+                                      fetches,
+                                      {},
+                                      ExecutionMode::ORT_SEQUENTIAL,
+                                      this->context_.GetTerminateFlag(),
+                                      this->context_.Logger(),
+                                      this->ort_stream_);
+    }
 
     ORT_RETURN_IF_ERROR(status);
 
@@ -241,10 +299,13 @@ Status BeamSearchGpt<T>::Execute(const FeedsFetchesManager& feeds_fetches_manage
 
     // Prepare inputs for next round of subgraph call.
     if (current_length < parameters->max_length) {
+      // For the first iteration, position_ids is initialized as sequence lengths. We can add it to feeds directly.
+      // For the remaining iterations, we need increase position_ids first, then add it to feeds.
+      bool increase_position = (iteration_counter > 1);
       ORT_RETURN_IF_ERROR(UpdateFeeds(fetches, feeds, current_length,
-                                      position_ids,
-                                      beam_next_tokens.as_span<const int32_t>(),
-                                      beam_indices.as_span<const int32_t>()));
+                                      position_ids, increase_position,
+                                      ReinterpretAsSpan<const int32_t>(beam_next_tokens),
+                                      ReinterpretAsSpan<const int32_t>(beam_indices)));
     }
     fetches.clear();
   }
@@ -268,7 +329,7 @@ Status BeamSearchGpt<T>::Execute(const FeedsFetchesManager& feeds_fetches_manage
   if (output_scores != nullptr) {
     gsl::span<float> target = output_scores->MutableDataAsSpan<float>();
     gsl::span<const float> source = gsl::span<const float>(beam_state.scores.data(), beam_state.scores.size());
-    assert(target.length() == source.length());
+    assert(target.size() == source.size());
     ORT_RETURN_IF_ERROR(this->device_copy_func_(target, source, nullptr, DeviceCopyDirection::deviceToDevice));
   }
 
