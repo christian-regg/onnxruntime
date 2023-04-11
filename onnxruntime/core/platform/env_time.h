@@ -21,7 +21,7 @@ limitations under the License.
 
 namespace onnxruntime {
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(WITH_UE) // Original: #ifdef _WIN32
 using TIME_SPEC = int64_t;
 #else
 using TIME_SPEC = timespec;

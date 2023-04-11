@@ -16,7 +16,12 @@
 #pragma warning(disable : 4324)
 #endif // _MSC_VER
 
+#include "NNEThirdPartyWarningDisabler.h" // WITH_UE
+NNE_THIRD_PARTY_INCLUDES_START
+#undef TEXT
+#undef check
 #include <absl/container/inlined_vector.h>
+NNE_THIRD_PARTY_INCLUDES_END // WITH_UE
 
 #ifdef _MSC_VER
 #pragma warning(pop)

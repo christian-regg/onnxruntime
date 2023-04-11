@@ -3,7 +3,14 @@
 
 #pragma once
 #ifdef _WIN32
+
+#include "NNEThirdPartyWarningDisabler.h" // WITH_UE
+NNE_THIRD_PARTY_INCLUDES_START
+#undef TEXT
+#undef check
 #include <Windows.h>
+NNE_THIRD_PARTY_INCLUDES_END // WITH_UE
+
 #include <mutex>
 namespace onnxruntime {
 // Q: Why OrtMutex is better than std::mutex

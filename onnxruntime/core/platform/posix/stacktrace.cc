@@ -1,3 +1,13 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+#ifdef WITH_UE
+#include <vector>
+#include <string>
+namespace onnxruntime {
+  std::vector<std::string> GetStackTrace() { return {}; }
+}  // namespace onnxruntime
+
+#else //WITH_UE
+
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
@@ -46,3 +56,4 @@ std::vector<std::string> GetStackTrace() {
   return stack;
 }
 }  // namespace onnxruntime
+#endif //WITH_UE

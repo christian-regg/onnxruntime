@@ -3,6 +3,11 @@
 
 #pragma once
 
+#include "NNEThirdPartyWarningDisabler.h" // WITH_UE
+NNE_THIRD_PARTY_INCLUDES_START
+#undef check
+#undef TEXT
+
 #include "contrib_ops/cpu/transformers/beam_search_shared.h"  // for DEBUG_BEAM_SEARCH
 #include "contrib_ops/cpu/transformers/beam_search_impl_base.h"
 #include "contrib_ops/cpu/transformers/subgraph_t5_encoder.h"
@@ -326,3 +331,4 @@ Status BeamSearchT5<T>::Execute(const FeedsFetchesManager& encoder_feeds_fetches
 }  // namespace transformers
 }  // namespace contrib
 }  // namespace onnxruntime
+NNE_THIRD_PARTY_INCLUDES_END // WITH_UE

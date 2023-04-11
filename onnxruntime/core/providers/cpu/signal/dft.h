@@ -15,7 +15,11 @@ class DFT final : public OpKernel {
   explicit DFT(const OpKernelInfo& info) : OpKernel(info) {
     is_onesided_ = static_cast<bool>(info.GetAttrOrDefault<int64_t>("onesided", 0));
     axis_ = info.GetAttrOrDefault<int64_t>("axis", 1);
-    is_inverse_ = info.GetAttrOrDefault<int64_t>("inverse", 0);
+#ifdef WITH_UE
+    is_inverse_ = static_cast<bool>(info.GetAttrOrDefault<int64_t>("inverse", 0));
+#else
+	is_inverse_ = info.GetAttrOrDefault<int64_t>("inverse", 0);
+#endif
   }
   Status Compute(OpKernelContext* ctx) const override;
 };

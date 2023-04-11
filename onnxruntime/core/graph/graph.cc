@@ -558,7 +558,19 @@ const Path& Node::ModelPath() const noexcept {
 #if !defined(ORT_MINIMAL_BUILD)
 
 bool Node::CanBeInlined() const {
-  return func_body_ || func_template_ || op_ && (op_->HasFunction() || op_->HasContextDependentFunction());
+#ifdef WITH_UE
+#if defined(__PROSPERO__) || defined(__clang__) 
+	const bool aux_1 = (op_->HasFunction() || op_->HasContextDependentFunction());
+	const bool aux_2 = op_ && aux_1;
+	const bool aux_3 = func_body_ || func_template_ || aux_2;
+	return aux_3;
+#else
+	return func_body_ || func_template_ || op_ && (op_->HasFunction() || op_->HasContextDependentFunction());
+#endif
+
+#else
+	return func_body_ || func_template_ || op_ && (op_->HasFunction() || op_->HasContextDependentFunction());
+#endif
 }
 
 bool Node::TryGetFunctionProto(ONNX_NAMESPACE::FunctionProto& onnx_function_proto) const {

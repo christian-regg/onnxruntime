@@ -36,10 +36,16 @@ limitations under the License.
 #include <sched.h>
 #endif
 #endif
+
+#include "NNEThirdPartyWarningDisabler.h" // WITH_UE
+NNE_THIRD_PARTY_INCLUDES_START // WITH_UE: C4996: 'X': warning STL4017: std::wbuffer_convert, std::wstring_convert, and the <codecvt> header (containing [...]) are deprecated in C++17 [...]
+#include "GenericPlatform/GenericPlatformMisc.h" // WITH_UE
+
 #if defined(_MSC_VER) && !defined(__clang__)
 // Chance of arithmetic overflow could be reduced
 #pragma warning(disable : 26451)
 #endif
+
 namespace onnxruntime {
 
 namespace concurrency {
@@ -135,6 +141,14 @@ void ThreadPoolProfiler::MainThreadStat::LogCore() {
 #endif
 #elif defined(__wasm__)
   core_ = emscripten_num_logical_cores();
+#elif defined(WITH_UE)
+  // This is the simplest way to do it without writing platform dependent
+  // code.
+  const int32 ProcessorCoreCount = FGenericPlatformMisc::NumberOfCoresIncludingHyperthreads();
+  if (ProcessorCoreCount == 0) {
+   ORT_THROW("Fatal error: 0 count processors from GetLogicalProcessorInformation");
+  }
+  core_ = ProcessorCoreCount;
 #else
   core_ = sched_getcpu();
 #endif
@@ -217,6 +231,14 @@ void ThreadPoolProfiler::LogRun(int thread_idx) {
 #endif
 #elif defined(__wasm__)
       child_thread_stats_[thread_idx].core_ = emscripten_num_logical_cores();
+#elif defined(WITH_UE)
+	  // This is the simplest way to do it without writing platform dependent
+	  // code.
+    const int32 ProcessorCoreCount = FGenericPlatformMisc::NumberOfCoresIncludingHyperthreads();
+    if (ProcessorCoreCount == 0) {
+		  ORT_THROW("Fatal error: 0 count processors from GetLogicalProcessorInformation");
+	  }
+	  child_thread_stats_[thread_idx].core_ = ProcessorCoreCount;
 #else
       child_thread_stats_[thread_idx].core_ = sched_getcpu();
 #endif
@@ -699,3 +721,5 @@ void ThreadPool::TryParallelFor(concurrency::ThreadPool* tp, std::ptrdiff_t tota
 
 }  // namespace concurrency
 }  // namespace onnxruntime
+
+NNE_THIRD_PARTY_INCLUDES_END // WITH_UE

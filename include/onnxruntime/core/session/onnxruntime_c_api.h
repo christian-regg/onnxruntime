@@ -26,6 +26,16 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "GenericPlatform/GenericPlatformAffinity.h" // WITH_UE
+#ifdef _WIN32 // WITH_UE
+#include "NNEThirdPartyWarningDisabler.h"
+NNE_THIRD_PARTY_INCLUDES_START
+#undef check
+#undef TEXT
+#include <Windows.h>
+NNE_THIRD_PARTY_INCLUDES_END
+#endif // WITH_UE
+
 /** \brief The API version defined in this header
 *
 * This value is used by some API functions to behave as this version of the header expects.
@@ -65,24 +75,29 @@ extern "C" {
 #define ORT_ALL_ARGS_NONNULL
 #endif
 
+#define ORT_EXPORT NNEONNXRUNTIME_API // WITH_UE
 #ifdef _WIN32
 // Define ORT_DLL_IMPORT if your program is dynamically linked to Ort.
 // dllexport is not used, we use a .def file.
+#ifndef WITH_UE
 #ifdef ORT_DLL_IMPORT
 #define ORT_EXPORT __declspec(dllimport)
 #else
 #define ORT_EXPORT
 #endif
+#endif //WITH_UE
 #define ORT_API_CALL _stdcall
 #define ORT_MUST_USE_RESULT
 #define ORTCHAR_T wchar_t
 #else
 // To make symbols visible on macOS/iOS
+#ifndef WITH_UE
 #ifdef __APPLE__
 #define ORT_EXPORT __attribute__((visibility("default")))
 #else
 #define ORT_EXPORT
 #endif
+#endif //WITH_UE
 #define ORT_API_CALL
 #define ORT_MUST_USE_RESULT __attribute__((warn_unused_result))
 #define ORTCHAR_T char
@@ -3218,6 +3233,8 @@ struct OrtApi {
   * \snippet{doc} snippets.dox OrtStatus Return Value
   */
   ORT_API2_STATUS(SynchronizeBoundOutputs, _Inout_ OrtIoBinding* binding_ptr);
+
+  ORT_API2_STATUS(SetPriorityOpThreads, _Inout_ OrtSessionOptions* options, EThreadPriority ThreadPri); // WITH_UE: Set the compute threads priority. Place at the end of this struct to avoid "Size of version X API cannot change" error
 
   /// \name OrtSessionOptions
   /// @{
